@@ -4,7 +4,7 @@ exports.handler = async (event) => {
     const response = {
         statusCode: 200,
         body: JSON.stringify({
-            message: 'Hello World I am Vivek Patel',
+            message: 'Hello World I am Vicky, how are you',
             timestamp: new Date().toISOString(),
             event: event
         }),
