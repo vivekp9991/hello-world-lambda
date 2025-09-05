@@ -173,18 +173,20 @@ jobs:
             --function-name ${{ steps.lambda-config.outputs.function-name }}
 
           # Try to update alias, if it doesn't exist, create it
-          if aws lambda get-alias --function-name ${{ steps.lambda-config.outputs.function-name }} --name ${{ steps.parse.outputs.region_code }} 2>/dev/null; then
+          if aws lambda get-alias \
+            --function-name ${{ steps.lambda-config.outputs.function-name }} \
+            --name ${{ steps.parse.outputs.region_code }} 2>/dev/null; then
             echo "Updating existing alias..."
             aws lambda update-alias \
               --function-name ${{ steps.lambda-config.outputs.function-name }} \
               --name ${{ steps.parse.outputs.region_code }} \
-              --function-version $VERSION
+              --function-version "$VERSION"
           else
             echo "Creating new alias..."
             aws lambda create-alias \
               --function-name ${{ steps.lambda-config.outputs.function-name }} \
               --name ${{ steps.parse.outputs.region_code }} \
-              --function-version $VERSION \
+              --function-version "$VERSION" \
               --description "Deployment from PR"
           fi
 
