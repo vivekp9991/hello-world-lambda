@@ -1,0 +1,21 @@
+{
+  "environments": {
+    "ue1": {
+      "region": "us-east-1",
+      "alias": "production-us"
+    },
+    "aps1": {
+      "region": "ap-south-1",
+      "alias": "production-india"
+    },
+    "uw2": {
+      "region": "us-west-2",
+      "alias": "staging"
+    }
+  },
+  "lambda": {
+    "runtime": "nodejs18.x",
+    "timeout": 30,
+    "memory": 256
+  }
+}
