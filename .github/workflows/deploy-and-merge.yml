@@ -14,311 +14,311 @@ jobs:
   deploy-and-merge:
     if: github.event.issue.pull_request && startsWith(github.event.comment.body, '/deploy')
     runs-on: ubuntu-latest
-    
-    steps:
-    # Step 1: Parse the deploy command
-    - name: Parse Deploy Command
-      id: parse
-      run: |
-        COMMENT="${{ github.event.comment.body }}"
-        echo "Comment received: $COMMENT"
-        
-        # Parse the command and set region
-        if [[ "$COMMENT" == "/deploy ue1" ]]; then
-          echo "region=us-east-1" >> $GITHUB_OUTPUT
-          echo "region_code=ue1" >> $GITHUB_OUTPUT
-          echo "valid=true" >> $GITHUB_OUTPUT
-        elif [[ "$COMMENT" == "/deploy aps1" ]]; then
-          echo "region=ap-south-1" >> $GITHUB_OUTPUT
-          echo "region_code=aps1" >> $GITHUB_OUTPUT
-          echo "valid=true" >> $GITHUB_OUTPUT
-        elif [[ "$COMMENT" == "/deploy uw2" ]]; then
-          echo "region=us-west-2" >> $GITHUB_OUTPUT
-          echo "region_code=uw2" >> $GITHUB_OUTPUT
-          echo "valid=true" >> $GITHUB_OUTPUT
-        else
-          echo "valid=false" >> $GITHUB_OUTPUT
-          echo "Invalid deploy command"
-          exit 1
-        fi
-    
-    # Step 2: Comment that deployment is starting
-    - name: Comment Start
-      uses: actions/github-script@v6
-      with:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
-        script: |
-          await github.rest.issues.createComment({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            issue_number: context.issue.number,
-            body: `🚀 **Starting deployment to ${{ steps.parse.outputs.region }}**\n\nDeployed by: @${{ github.event.comment.user.login }}`
-          });
-    
-    # Step 3: Get PR information
-    - name: Get PR Details
-      id: pr-details
-      uses: actions/github-script@v6
-      with:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
-        script: |
-          const pr = await github.rest.pulls.get({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            pull_number: context.issue.number
-          });
-          
-          console.log(`PR #${context.issue.number}`);
-          console.log(`PR head ref: ${pr.data.head.ref}`);
-          console.log(`PR mergeable: ${pr.data.mergeable}`);
-          
-          return {
-            branch: pr.data.head.ref,
-            sha: pr.data.head.sha,
-            mergeable: pr.data.mergeable,
-            title: pr.data.title
-          };
-    
-    # Step 4: Checkout PR branch
-    - name: Checkout PR branch
-      uses: actions/checkout@v3
-      with:
-        ref: ${{ fromJson(steps.pr-details.outputs.result).branch }}
-        fetch-depth: 0
-        token: ${{ secrets.GITHUB_TOKEN }}
-    
-    # Step 5: Configure AWS
-    - name: Configure AWS Credentials
-      uses: aws-actions/configure-aws-credentials@v2
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ steps.parse.outputs.region }}
-    
-    # Step 6: Setup Node.js
-    - name: Setup Node.js
-      uses: actions/setup-node@v3
-      with:
-        node-version: '18'
-    
-    # Step 7: Prepare Lambda function name
-    - name: Determine Lambda Function Name
-      id: lambda-config
-      run: |
-        REPO_NAME="${{ github.event.repository.name }}"
-        FUNCTION_NAME="${REPO_NAME}-lambda"
-        echo "function-name=$FUNCTION_NAME" >> $GITHUB_OUTPUT
-        echo "Deploying to function: $FUNCTION_NAME in region: ${{ steps.parse.outputs.region }}"
-    
-    # Step 8: Check if Lambda exists
-    - name: Check Lambda Existence
-      id: check-lambda
-      continue-on-error: true
-      run: |
-        if aws lambda get-function --function-name ${{ steps.lambda-config.outputs.function-name }} 2>/dev/null; then
-          echo "exists=true" >> $GITHUB_OUTPUT
-          echo "Lambda function exists"
-        else
-          echo "exists=false" >> $GITHUB_OUTPUT
-          echo "Lambda function does not exist, will create it"
-        fi
-    
-    # Step 9: Create Lambda if needed
-    - name: Create Lambda Function
-      if: steps.check-lambda.outputs.exists == 'false'
-      run: |
-        cd src
-        zip -r ../initial-function.zip .
-        cd ..
-        
-        # Create Lambda with basic execution role
-        aws lambda create-function \
-          --function-name ${{ steps.lambda-config.outputs.function-name }} \
-          --runtime nodejs18.x \
-          --role arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/lambda-execution-role \
-          --handler index.handler \
-          --zip-file fileb://initial-function.zip \
-          --timeout 30 \
-          --memory-size 256
-        
-        echo "Lambda function created successfully"
-    
-    # Step 10: Build and package
-    - name: Install Dependencies and Package
-      run: |
-        cd src
-        npm init -y
-        npm install --production
-        zip -r ../function.zip .
-        cd ..
-        echo "Deployment package created"
-    
-    # Step 11: Deploy to Lambda
-    - name: Deploy to Lambda
-      id: deploy
-      run: |
-        # Update function code
-        aws lambda update-function-code \
-          --function-name ${{ steps.lambda-config.outputs.function-name }} \
-          --zip-file fileb://function.zip \
-          --publish > update-output.json
-        
-        # Get the new version number
-        VERSION=$(cat update-output.json | jq -r '.Version')
-        echo "Deployed version: $VERSION"
-        
-        # Wait for update to complete
-        echo "Waiting for Lambda update to complete..."
-        aws lambda wait function-updated \
-          --function-name ${{ steps.lambda-config.outputs.function-name }}
-        
-        # Try to update alias, if it doesn't exist, create it
-        if aws lambda get-alias --function-name ${{ steps.lambda-config.outputs.function-name }} --name ${{ steps.parse.outputs.region_code }} 2>/dev/null; then
-          echo "Updating existing alias..."
-          aws lambda update-alias \
-            --function-name ${{ steps.lambda-config.outputs.function-name }} \
-            --name ${{ steps.parse.outputs.region_code }} \
-            --function-version $VERSION
-        else
-          echo "Creating new alias..."
-          aws lambda create-alias \
-            --function-name ${{ steps.lambda-config.outputs.function-name }} \
-            --name ${{ steps.parse.outputs.region_code }} \
-            --function-version $VERSION \
-            --description "Deployment from PR"
-        fi
-        
-        echo "deployment-success=true" >> $GITHUB_OUTPUT
-        echo "deployed-version=$VERSION" >> $GITHUB_OUTPUT
-        echo "✅ Lambda deployment completed successfully (Version: $VERSION)"
 
-    # Step 11.5: Verify Deployment
-    - name: Verify Deployed Code
-      if: steps.deploy.outputs.deployment-success == 'true'
-      run: |
-        echo "Testing deployed function..."
-        aws lambda invoke \
-          --function-name ${{ steps.lambda-config.outputs.function-name }} \
-          --payload '{"test": "verification"}' \
-          verify-response.json
-        
-        echo "Function response:"
-        cat verify-response.json
-        
-        # Check if response contains our new message
-        if grep -q "Vivek Patel" verify-response.json; then
-          echo "✅ Deployment verified - new code is live!"
-        else
-          echo "⚠️ Warning - response doesn't contain expected message"
-          echo "Function may be using cached or old code"
-        fi
-    
-    # Step 12: Comment deployment success
-    - name: Comment Deployment Success
-      if: steps.deploy.outputs.deployment-success == 'true'
-      uses: actions/github-script@v6
-      with:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
-        script: |
-          const comment = `### ✅ Deployment Successful!
-          
-          **Deployment Details:**
-          - 🌍 **Region:** \`${{ steps.parse.outputs.region }}\`
-          - 🔧 **Function:** \`${{ steps.lambda-config.outputs.function-name }}\`
-          - 👤 **Deployed by:** @${{ github.event.comment.user.login }}
-          - 🕐 **Time:** ${new Date().toISOString()}
-          
-          ### 🔄 Auto-Merge Status
-          Attempting to merge PR automatically...`;
-          
-          await github.rest.issues.createComment({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            issue_number: context.issue.number,
-            body: comment
-          });
-    
-    # Step 13: Auto-merge the PR
-    - name: Auto-Merge PR
-      id: merge
-      if: steps.deploy.outputs.deployment-success == 'true'
-      uses: actions/github-script@v6
-      with:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
-        script: |
-          try {
-            // Wait a moment for deployment to stabilize
-            await new Promise(resolve => setTimeout(resolve, 3000));
-            
-            // Check if PR is mergeable
+    steps:
+      # Step 1: Parse the deploy command
+      - name: Parse Deploy Command
+        id: parse
+        run: |
+          COMMENT="${{ github.event.comment.body }}"
+          echo "Comment received: $COMMENT"
+
+          # Parse the command and set region
+          if [[ "$COMMENT" == "/deploy ue1" ]]; then
+            echo "region=us-east-1" >> $GITHUB_OUTPUT
+            echo "region_code=ue1" >> $GITHUB_OUTPUT
+            echo "valid=true" >> $GITHUB_OUTPUT
+          elif [[ "$COMMENT" == "/deploy aps1" ]]; then
+            echo "region=ap-south-1" >> $GITHUB_OUTPUT
+            echo "region_code=aps1" >> $GITHUB_OUTPUT
+            echo "valid=true" >> $GITHUB_OUTPUT
+          elif [[ "$COMMENT" == "/deploy uw2" ]]; then
+            echo "region=us-west-2" >> $GITHUB_OUTPUT
+            echo "region_code=uw2" >> $GITHUB_OUTPUT
+            echo "valid=true" >> $GITHUB_OUTPUT
+          else
+            echo "valid=false" >> $GITHUB_OUTPUT
+            echo "Invalid deploy command"
+            exit 1
+          fi
+
+      # Step 2: Comment that deployment is starting
+      - name: Comment Start
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `🚀 **Starting deployment to ${{ steps.parse.outputs.region }}**\n\nDeployed by: @${{ github.event.comment.user.login }}`
+            });
+
+      # Step 3: Get PR information
+      - name: Get PR Details
+        id: pr-details
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
             const pr = await github.rest.pulls.get({
               owner: context.repo.owner,
               repo: context.repo.repo,
               pull_number: context.issue.number
             });
-            
-            if (pr.data.mergeable === false) {
-              throw new Error('PR has conflicts or is not mergeable');
-            }
-            
-            // Perform the merge
-            const mergeResult = await github.rest.pulls.merge({
+
+            console.log(`PR #${context.issue.number}`);
+            console.log(`PR head ref: ${pr.data.head.ref}`);
+            console.log(`PR mergeable: ${pr.data.mergeable}`);
+
+            return {
+              branch: pr.data.head.ref,
+              sha: pr.data.head.sha,
+              mergeable: pr.data.mergeable,
+              title: pr.data.title
+            };
+
+      # Step 4: Checkout PR branch
+      - name: Checkout PR branch
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ fromJson(steps.pr-details.outputs.result).branch }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Step 5: Configure AWS
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ steps.parse.outputs.region }}
+
+      # Step 6: Setup Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: "18"
+
+      # Step 7: Prepare Lambda function name
+      - name: Determine Lambda Function Name
+        id: lambda-config
+        run: |
+          REPO_NAME="${{ github.event.repository.name }}"
+          FUNCTION_NAME="${REPO_NAME}-lambda"
+          echo "function-name=$FUNCTION_NAME" >> $GITHUB_OUTPUT
+          echo "Deploying to function: $FUNCTION_NAME in region: ${{ steps.parse.outputs.region }}"
+
+      # Step 8: Check if Lambda exists
+      - name: Check Lambda Existence
+        id: check-lambda
+        continue-on-error: true
+        run: |
+          if aws lambda get-function --function-name ${{ steps.lambda-config.outputs.function-name }} 2>/dev/null; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Lambda function exists"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "Lambda function does not exist, will create it"
+          fi
+
+      # Step 9: Create Lambda if needed
+      - name: Create Lambda Function
+        if: steps.check-lambda.outputs.exists == 'false'
+        run: |
+          cd src
+          zip -r ../initial-function.zip .
+          cd ..
+
+          # Create Lambda with basic execution role
+          aws lambda create-function \
+            --function-name ${{ steps.lambda-config.outputs.function-name }} \
+            --runtime nodejs18.x \
+            --role arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/lambda-execution-role \
+            --handler index.handler \
+            --zip-file fileb://initial-function.zip \
+            --timeout 30 \
+            --memory-size 256
+
+          echo "Lambda function created successfully"
+
+      # Step 10: Build and package
+      - name: Install Dependencies and Package
+        run: |
+          cd src
+          npm init -y
+          npm install --production
+          zip -r ../function.zip .
+          cd ..
+          echo "Deployment package created"
+
+      # Step 11: Deploy to Lambda
+      - name: Deploy to Lambda
+        id: deploy
+        run: |
+          # Update function code
+          aws lambda update-function-code \
+            --function-name ${{ steps.lambda-config.outputs.function-name }} \
+            --zip-file fileb://function.zip \
+            --publish > update-output.json
+
+          # Get the new version number
+          VERSION=$(cat update-output.json | jq -r '.Version')
+          echo "Deployed version: $VERSION"
+
+          # Wait for update to complete
+          echo "Waiting for Lambda update to complete..."
+          aws lambda wait function-updated \
+            --function-name ${{ steps.lambda-config.outputs.function-name }}
+
+          # Try to update alias, if it doesn't exist, create it
+          if aws lambda get-alias --function-name ${{ steps.lambda-config.outputs.function-name }} --name ${{ steps.parse.outputs.region_code }} 2>/dev/null; then
+            echo "Updating existing alias..."
+            aws lambda update-alias \
+              --function-name ${{ steps.lambda-config.outputs.function-name }} \
+              --name ${{ steps.parse.outputs.region_code }} \
+              --function-version $VERSION
+          else
+            echo "Creating new alias..."
+            aws lambda create-alias \
+              --function-name ${{ steps.lambda-config.outputs.function-name }} \
+              --name ${{ steps.parse.outputs.region_code }} \
+              --function-version $VERSION \
+              --description "Deployment from PR"
+          fi
+
+          echo "deployment-success=true" >> $GITHUB_OUTPUT
+          echo "deployed-version=$VERSION" >> $GITHUB_OUTPUT
+          echo "✅ Lambda deployment completed successfully (Version: $VERSION)"
+
+      # Step 11.5: Verify Deployment
+      - name: Verify Deployed Code
+        if: steps.deploy.outputs.deployment-success == 'true'
+        run: |
+          echo "Testing deployed function..."
+          aws lambda invoke \
+            --function-name ${{ steps.lambda-config.outputs.function-name }} \
+            --payload '{"test": "verification"}' \
+            verify-response.json
+
+          echo "Function response:"
+          cat verify-response.json
+
+          # Check if response contains our new message
+          if grep -q "Vivek Patel" verify-response.json; then
+            echo "✅ Deployment verified - new code is live!"
+          else
+            echo "⚠️ Warning - response doesn't contain expected message"
+            echo "Function may be using cached or old code"
+          fi
+
+      # Step 12: Comment deployment success
+      - name: Comment Deployment Success
+        if: steps.deploy.outputs.deployment-success == 'true'
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const comment = `### ✅ Deployment Successful!
+
+            **Deployment Details:**
+            - 🌍 **Region:** \`${{ steps.parse.outputs.region }}\`
+            - 🔧 **Function:** \`${{ steps.lambda-config.outputs.function-name }}\`
+            - 👤 **Deployed by:** @${{ github.event.comment.user.login }}
+            - 🕐 **Time:** ${new Date().toISOString()}
+
+            ### 🔄 Auto-Merge Status
+            Attempting to merge PR automatically...`;
+
+            await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              pull_number: context.issue.number,
-              merge_method: 'merge',
-              commit_title: `Auto-merge PR #${context.issue.number} after deployment`,
-              commit_message: `Deployed to: ${{ steps.lambda-config.outputs.function-name }}\nRegion: ${{ steps.parse.outputs.region }}`
+              issue_number: context.issue.number,
+              body: comment
             });
-            
-            console.log('PR merged successfully');
-            return { merged: true, sha: mergeResult.data.sha };
-            
-          } catch (error) {
-            console.error('Failed to merge PR:', error.message);
-            return { merged: false, error: error.message };
-          }
-    
-    # Step 14: Final status comment
-    - name: Comment Final Status
-      if: always()
-      uses: actions/github-script@v6
-      with:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
-        script: |
-          const deploySuccess = '${{ steps.deploy.outputs.deployment-success }}' === 'true';
-          const mergeResult = ${{ steps.merge.outputs.result || '{}' }};
-          
-          let comment;
-          
-          if (deploySuccess && mergeResult.merged) {
-            comment = `### 🎉 Complete Success!
-            
-            ✅ **Lambda Deployed Successfully**
-            ✅ **PR Merged Automatically**
-            
-            The changes are now live in production!`;
-            
-          } else if (deploySuccess && !mergeResult.merged) {
-            comment = `### ⚠️ Deployment Successful but Merge Failed
-            
-            ✅ **Lambda Deployed Successfully**
-            ❌ **Auto-merge failed:** ${mergeResult.error || 'Unknown error'}
-            
-            **Manual Action Required:**
-            Please merge this PR manually.`;
-            
-          } else {
-            comment = `### ❌ Deployment Failed
-            
-            The deployment to Lambda failed. Please check the logs and try again.
-            
-            [View Logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})`;
-          }
-          
-          await github.rest.issues.createComment({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            issue_number: context.issue.number,
-            body: comment
-          });
+
+      # Step 13: Auto-merge the PR
+      - name: Auto-Merge PR
+        id: merge
+        if: steps.deploy.outputs.deployment-success == 'true'
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            try {
+              // Wait a moment for deployment to stabilize
+              await new Promise(resolve => setTimeout(resolve, 3000));
+              
+              // Check if PR is mergeable
+              const pr = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.issue.number
+              });
+              
+              if (pr.data.mergeable === false) {
+                throw new Error('PR has conflicts or is not mergeable');
+              }
+              
+              // Perform the merge
+              const mergeResult = await github.rest.pulls.merge({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.issue.number,
+                merge_method: 'merge',
+                commit_title: `Auto-merge PR #${context.issue.number} after deployment`,
+                commit_message: `Deployed to: ${{ steps.lambda-config.outputs.function-name }}\nRegion: ${{ steps.parse.outputs.region }}`
+              });
+              
+              console.log('PR merged successfully');
+              return { merged: true, sha: mergeResult.data.sha };
+              
+            } catch (error) {
+              console.error('Failed to merge PR:', error.message);
+              return { merged: false, error: error.message };
+            }
+
+      # Step 14: Final status comment
+      - name: Comment Final Status
+        if: always()
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const deploySuccess = '${{ steps.deploy.outputs.deployment-success }}' === 'true';
+            const mergeResult = ${{ steps.merge.outputs.result || '{}' }};
+
+            let comment;
+
+            if (deploySuccess && mergeResult.merged) {
+              comment = `### 🎉 Complete Success!
+              
+              ✅ **Lambda Deployed Successfully**
+              ✅ **PR Merged Automatically**
+              
+              The changes are now live in production!`;
+              
+            } else if (deploySuccess && !mergeResult.merged) {
+              comment = `### ⚠️ Deployment Successful but Merge Failed
+              
+              ✅ **Lambda Deployed Successfully**
+              ❌ **Auto-merge failed:** ${mergeResult.error || 'Unknown error'}
+              
+              **Manual Action Required:**
+              Please merge this PR manually.`;
+              
+            } else {
+              comment = `### ❌ Deployment Failed
+              
+              The deployment to Lambda failed. Please check the logs and try again.
+              
+              [View Logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})`;
+            }
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: comment
+            });
