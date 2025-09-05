@@ -157,17 +157,56 @@ jobs:
     - name: Deploy to Lambda
       id: deploy
       run: |
+        # Update function code
         aws lambda update-function-code \
           --function-name ${{ steps.lambda-config.outputs.function-name }} \
           --zip-file fileb://function.zip \
-          --publish
+          --publish > update-output.json
         
+        # Get the new version number
+        VERSION=$(cat update-output.json | jq -r '.Version')
+        echo "Deployed version: $VERSION"
+        
+        # Wait for update to complete
         echo "Waiting for Lambda update to complete..."
         aws lambda wait function-updated \
           --function-name ${{ steps.lambda-config.outputs.function-name }}
         
+        # Create or update alias to point to new version
+        aws lambda update-alias \
+          --function-name ${{ steps.lambda-config.outputs.function-name }} \
+          --name ${{ steps.parse.outputs.region_code }} \
+          --function-version $VERSION 2>/dev/null || \
+        aws lambda create-alias \
+          --function-name ${{ steps.lambda-config.outputs.function-name }} \
+          --name ${{ steps.parse.outputs.region_code }} \
+          --function-version $VERSION \
+          --description "Deployment from PR"
+        
         echo "deployment-success=true" >> $GITHUB_OUTPUT
-        echo "✅ Lambda deployment completed successfully"
+        echo "deployed-version=$VERSION" >> $GITHUB_OUTPUT
+        echo "✅ Lambda deployment completed successfully (Version: $VERSION)"|
+
+    # Step 11.5: Verify Deployment
+    - name: Verify Deployed Code
+      if: steps.deploy.outputs.deployment-success == 'true'
+      run: |
+        echo "Testing deployed function..."
+        aws lambda invoke \
+          --function-name ${{ steps.lambda-config.outputs.function-name }} \
+          --payload '{"test": "verification"}' \
+          verify-response.json
+        
+        echo "Function response:"
+        cat verify-response.json
+        
+        # Check if response contains our new message
+        if grep -q "Vivek Patel" verify-response.json; then
+          echo "✅ Deployment verified - new code is live!"
+        else
+          echo "⚠️ Warning - response doesn't contain expected message"
+          echo "Function may be using cached or old code"
+        fi
     
     # Step 12: Comment deployment success
     - name: Comment Deployment Success
