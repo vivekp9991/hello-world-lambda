@@ -195,7 +195,7 @@ jobs:
           echo "deployed-version=$VERSION" >> $GITHUB_OUTPUT
           echo "Lambda deployment completed successfully - Version: $VERSION"
 
-      # Step 11.5: Verify Deployment
+      # Step 12: Verify Deployment
       - name: Verify Deployed Code
         if: steps.deploy.outputs.deployment-success == 'true'
         run: |
@@ -216,7 +216,7 @@ jobs:
             echo "Function may be using cached or old code"
           fi
 
-      # Step 12: Comment deployment success
+      # Step 13: Comment deployment success
       - name: Comment Deployment Success
         if: steps.deploy.outputs.deployment-success == 'true'
         uses: actions/github-script@v6
@@ -228,6 +228,7 @@ jobs:
             **Deployment Details:**
             - 🌍 **Region:** \`${{ steps.parse.outputs.region }}\`
             - 🔧 **Function:** \`${{ steps.lambda-config.outputs.function-name }}\`
+            - 🏷️ **Version:** \`${{ steps.deploy.outputs.deployed-version }}\`
             - 👤 **Deployed by:** @${{ github.event.comment.user.login }}
             - 🕐 **Time:** ${new Date().toISOString()}
 
@@ -241,7 +242,7 @@ jobs:
               body: comment
             });
 
-      # Step 13: Auto-merge the PR
+      # Step 14: Auto-merge the PR
       - name: Auto-Merge PR
         id: merge
         if: steps.deploy.outputs.deployment-success == 'true'
@@ -271,7 +272,7 @@ jobs:
                 pull_number: context.issue.number,
                 merge_method: 'merge',
                 commit_title: `Auto-merge PR #${context.issue.number} after deployment`,
-                commit_message: `Deployed to: ${{ steps.lambda-config.outputs.function-name }}\nRegion: ${{ steps.parse.outputs.region }}`
+                commit_message: `Deployed to: ${{ steps.lambda-config.outputs.function-name }}\nRegion: ${{ steps.parse.outputs.region }}\nVersion: ${{ steps.deploy.outputs.deployed-version }}`
               });
               
               console.log('PR merged successfully');
@@ -282,7 +283,7 @@ jobs:
               return { merged: false, error: error.message };
             }
 
-      # Step 14: Final status comment
+      # Step 15: Final status comment
       - name: Comment Final Status
         if: always()
         uses: actions/github-script@v6
