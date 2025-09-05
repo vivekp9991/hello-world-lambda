@@ -185,7 +185,7 @@ jobs:
         
         echo "deployment-success=true" >> $GITHUB_OUTPUT
         echo "deployed-version=$VERSION" >> $GITHUB_OUTPUT
-        echo "✅ Lambda deployment completed successfully (Version: $VERSION)"
+        echo "✅ Lambda deployment completed successfully (Version: $VERSION)"|
 
     # Step 11.5: Verify Deployment
     - name: Verify Deployed Code
