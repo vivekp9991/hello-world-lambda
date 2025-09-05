@@ -153,7 +153,7 @@ jobs:
         cd ..
         echo "Deployment package created"
     
-    # Step 11: Deploy to Lambda
+   # Step 11: Deploy to Lambda
     - name: Deploy to Lambda
       id: deploy
       run: |
@@ -176,8 +176,7 @@ jobs:
         aws lambda update-alias \
           --function-name ${{ steps.lambda-config.outputs.function-name }} \
           --name ${{ steps.parse.outputs.region_code }} \
-          --function-version $VERSION 2>/dev/null || \
-        aws lambda create-alias \
+          --function-version $VERSION 2>/dev/null || aws lambda create-alias \
           --function-name ${{ steps.lambda-config.outputs.function-name }} \
           --name ${{ steps.parse.outputs.region_code }} \
           --function-version $VERSION \
