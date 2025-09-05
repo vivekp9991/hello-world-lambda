@@ -153,7 +153,7 @@ jobs:
         cd ..
         echo "Deployment package created"
     
- # Step 11: Deploy to Lambda
+    # Step 11: Deploy to Lambda
     - name: Deploy to Lambda
       id: deploy
       run: |
