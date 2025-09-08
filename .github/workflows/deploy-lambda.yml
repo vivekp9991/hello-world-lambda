@@ -47,11 +47,12 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
+            const body = 'Starting deployment to ' + '${{ steps.parse.outputs.region }}' + '\n\nDeployed by: @' + '${{ github.event.comment.user.login }}';
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: 'Starting deployment to ' + '${{ steps.parse.outputs.region }}' + '\n\nDeployed by: @' + '${{ github.event.comment.user.login }}'
+              body: body
             });
 
       # Step 3: Get PR information
@@ -213,14 +214,7 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const comment = 'Deployment Successful!\n\n' +
-              'Region: ' + '${{ steps.parse.outputs.region }}' + '\n' +
-              'Function: ' + '${{ steps.lambda-config.outputs.function-name }}' + '\n' +
-              'Version: ' + '${{ steps.deploy.outputs.deployed-version }}' + '\n' +
-              'Deployed by: @' + '${{ github.event.comment.user.login }}' + '\n' +
-              'Time: ' + new Date().toISOString() + '\n\n' +
-              'Auto-Merge Status: Attempting to merge PR automatically...';
-
+            const comment = 'Deployment Successful!\n\nRegion: ' + '${{ steps.parse.outputs.region }}' + '\nFunction: ' + '${{ steps.lambda-config.outputs.function-name }}' + '\nVersion: ' + '${{ steps.deploy.outputs.deployed-version }}' + '\nDeployed by: @' + '${{ github.event.comment.user.login }}' + '\nTime: ' + new Date().toISOString() + '\n\nAuto-Merge Status: Attempting to merge PR automatically...';
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -279,21 +273,11 @@ jobs:
             let comment;
 
             if (deploySuccess && mergeResult.merged) {
-              comment = 'Complete Success!\n\n' +
-                'Lambda Deployed Successfully\n' +
-                'PR Merged Automatically\n\n' +
-                'The changes are now live in production!';
-              
+              comment = 'Complete Success!\n\nLambda Deployed Successfully\nPR Merged Automatically\n\nThe changes are now live in production!';
             } else if (deploySuccess && !mergeResult.merged) {
-              comment = 'Deployment Successful but Merge Failed\n\n' +
-                'Lambda Deployed Successfully\n' +
-                'Auto-merge failed: ' + (mergeResult.error || 'Unknown error') + '\n\n' +
-                'Manual Action Required: Please merge this PR manually.';
-              
+              comment = 'Deployment Successful but Merge Failed\n\nLambda Deployed Successfully\nAuto-merge failed: ' + (mergeResult.error || 'Unknown error') + '\n\nManual Action Required: Please merge this PR manually.';
             } else {
-              comment = 'Deployment Failed\n\n' +
-                'The deployment to Lambda failed. Please check the logs and try again.\n\n' +
-                'View Logs: ' + '${{ github.server_url }}' + '/' + '${{ github.repository }}' + '/actions/runs/' + '${{ github.run_id }}';
+              comment = 'Deployment Failed\n\nThe deployment to Lambda failed. Please check the logs and try again.\n\nView Logs: ' + '${{ github.server_url }}' + '/' + '${{ github.repository }}' + '/actions/runs/' + '${{ github.run_id }}';
             }
 
             await github.rest.issues.createComment({
