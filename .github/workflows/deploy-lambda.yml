@@ -227,10 +227,10 @@ jobs:
             - 🌍 **Region:** \`${{ steps.parse.outputs.region }}\`
             - 🔧 **Function:** \`${{ steps.lambda-config.outputs.function-name }}\`
             - 🏷️ **Version:** \`${{ steps.deploy.outputs.deployed-version }}\`
-            - �� **Deployed by:** @${{ github.event.comment.user.login }}
+            - ✨ **Deployed by:** @${{ github.event.comment.user.login }}
             - 🕐 **Time:** ${new Date().toISOString()}
 
-            ### �� Auto-Merge Status
+            ### 🔄 Auto-Merge Status
             Attempting to merge PR automatically...`;
 
             await github.rest.issues.createComment({
@@ -294,7 +294,7 @@ jobs:
             let comment;
 
             if (deploySuccess && mergeResult.merged) {
-              comment = `### �� Complete Success!
+              comment = `### ✅ Complete Success!
               
               ✅ **Lambda Deployed Successfully**
               ✅ **PR Merged Automatically**
