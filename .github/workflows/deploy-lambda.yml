@@ -20,15 +20,9 @@ jobs:
         id: parse
         run: |
           COMMENT="${{ github.event.comment.body }}"
-          if [[ "$COMMENT" == "/deploy ue1" ]]; then
-            echo "region=us-east-1" >> $GITHUB_OUTPUT
-            echo "region_code=ue1" >> $GITHUB_OUTPUT
-          elif [[ "$COMMENT" == "/deploy aps1" ]]; then
+          if [[ "$COMMENT" == "/deploy aps1" ]]; then
             echo "region=ap-south-1" >> $GITHUB_OUTPUT
             echo "region_code=aps1" >> $GITHUB_OUTPUT
-          elif [[ "$COMMENT" == "/deploy uw2" ]]; then
-            echo "region=us-west-2" >> $GITHUB_OUTPUT
-            echo "region_code=uw2" >> $GITHUB_OUTPUT
           else
             echo "Invalid deploy command"
             exit 1
