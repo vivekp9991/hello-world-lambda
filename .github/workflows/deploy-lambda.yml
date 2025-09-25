@@ -1,6 +1,10 @@
 name: Deploy Lambda
 
 on:
+  push:
+    branches:
+      - '**'
+      - '!main'
   issue_comment:
     types: [created]
 
@@ -8,16 +12,16 @@ permissions:
   contents: write
   pull-requests: write
   issues: write
-  actions: read
 
 jobs:
   deploy-and-merge:
-    if: github.event.issue.pull_request && startsWith(github.event.comment.body, '/deploy')
+    if: (github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.comment.body, '/deploy')) || github.event_name == 'push'
     runs-on: ubuntu-latest
 
     steps:
       - name: Parse Deploy Command
         id: parse
+        if: github.event_name == 'issue_comment'
         run: |
           set -euo pipefail
           COMMENT="${{ github.event.comment.body }}"
@@ -29,10 +33,10 @@ jobs:
             exit 1
           fi
 
-      - name: Checkout PR branch
+      - name: Checkout branch
         uses: actions/checkout@v3
         with:
-          ref: ${{ github.head_ref }}
+          ref: ${{ github.event_name == 'issue_comment' && github.head_ref || github.ref }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Configure AWS Credentials
@@ -40,7 +44,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ steps.parse.outputs.region }}
+          aws-region: ap-south-1
 
       - name: Setup Node.js
         uses: actions/setup-node@v3
